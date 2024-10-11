@@ -82,18 +82,27 @@ class BatchTask:
         self.batch_id = self.upload_and_create_job()
         if self.batch_id is not None:
             llm_success = self.track_and_save_job_result()
-            sentiment_data = False
-            summarization_data = False
-            extraction_data = False
+            sentiment_output_data = None
+            summarization_data = None
+            extraction_data = None
             if llm_success and self.task_type == BatchTaskType.SENTIMENT:
                 self.join_results_with_original_data()
-                sentiment_data = self.score_review_data()
+                sentiment_output_data = self.score_review_data()
             elif self.task_type == BatchTaskType.SUMMARIZATION:
                 summarization_data = self.join_result_with_concatenated_data()
             elif self.task_type == BatchTaskType.EXTRACTION:
                 extraction_data = self.join_result_with_concatenated_data()
-            if sentiment_data and summarization_data and extraction_data:
-                self.join_final_result_data(sentiment_data, summarization_data, extraction_data)
+            if sentiment_output_data and summarization_data and extraction_data:
+                self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
+
+    def merge(self):
+        # todo: optimize by select the latest csv files
+        path_base = "output_data/join_result"
+        self.join_result_data_path = f"{path_base}_sentiment_20240925154832.csv"
+        sentiment_output_data = self.score_review_data()
+        summarization_data = f"{path_base}_summarization_20241003131302.csv"
+        extraction_data = f"{path_base}_key_attributes_extraction_20241008143543.csv"
+        self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
 
     def upload_and_create_job(self):
         file_id = self.upload_file()
@@ -259,29 +268,39 @@ class BatchTask:
         }
         df_input_data = pd.read_csv(self.join_result_data_path)
         df_input_data['sentiment_score'] = df_input_data.iloc[:, -1].map(sentiment_map)
-        df_sorted = df_input_data.sort_values(by='comment_time')
+        df_sorted = df_input_data.sort_values(by='comment_time', ascending=False)
         top_20_per_group = df_sorted.groupby(['club_id', 'course_id'], group_keys=False).apply(lambda x: x.head(20))
         aggregated = top_20_per_group.groupby(['club_id', 'course_id']).agg(
             score_sum=('sentiment_score', 'sum'),
             review_count=('sentiment_score', 'count')
         ).reset_index()
 
-        aggregated['score'] = aggregated['score_sum'] / aggregated['review_count']
-        scored_course_review_df = aggregated[['course_id', 'score']]
+        aggregated['sentiment_score_avg'] = aggregated['score_sum'] / aggregated['review_count']
+        scored_course_review_df = aggregated[['club_id', 'course_id', 'sentiment_score_avg']]
         scored_course_review_df.to_csv(self.score_review_result_data_path,
                                        encoding='utf-8',
                                        index=False,
                                        quoting=csv.QUOTE_ALL)
         return self.score_review_result_data_path
 
-    def join_final_result_data(self, sentiment_data, summarization_data, extraction_data):
-        sentiment_output_data = pd.read_csv(sentiment_data)
+    def join_final_result_data(self, sentiment_output_data, summarization_data, extraction_data):
+        sentiment_output_data = pd.read_csv(sentiment_output_data)
         summarization_data = pd.read_csv(summarization_data)
+        summarization_data = summarization_data[['club_id', 'course_id', 'result', 'comment']]
+        summarization_data.rename(
+            columns={'result': 'summarization_in_80_words_paragraph', 'comment': 'last_20_comments'},
+            inplace=True)
         extraction_data = pd.read_csv(extraction_data)
-        merged_df = sentiment_output_data.merge(sentiment_output_data, summarization_data,
-                                                on=['club_id', 'course_id'],
-                                                how='inner')  # Inner join by default
-        final_merged_df = pd.merge(merged_df, extraction_data,
-                                                on=['club_id', 'course_id'],
-                                                how='outer')  # Outer join
-        final_merged_df.to_csv(self.join_final_result_data_path)
+        extraction_data = extraction_data[['club_id', 'course_id', 'result']]
+        extraction_data.rename(columns={'result': 'summary_in_short_phrases'}, inplace=True)
+        course_names = pd.read_csv("input_data/golf_course_names.csv")
+        merged_df = pd.merge(sentiment_output_data, summarization_data,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df = pd.merge(merged_df, extraction_data,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df = pd.merge(merged_df, course_names,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df.to_csv(self.join_final_result_data_path)
