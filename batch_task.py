@@ -88,20 +88,15 @@ class BatchTask:
             if llm_success and self.task_type == BatchTaskType.SENTIMENT:
                 self.join_results_with_original_data()
                 sentiment_output_data = self.score_review_data()
+                return sentiment_output_data
             elif self.task_type == BatchTaskType.SUMMARIZATION:
                 summarization_data = self.join_result_with_concatenated_data()
+                return summarization_data
             elif self.task_type == BatchTaskType.EXTRACTION:
                 extraction_data = self.join_result_with_concatenated_data()
-            if sentiment_output_data and summarization_data and extraction_data:
-                self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
+                return extraction_data
 
-    def merge(self):
-        # todo: optimize by select the latest csv files
-        path_base = "output_data/join_result"
-        self.join_result_data_path = f"{path_base}_sentiment_20240925154832.csv"
-        sentiment_output_data = self.score_review_data()
-        summarization_data = f"{path_base}_summarization_20241003131302.csv"
-        extraction_data = f"{path_base}_key_attributes_extraction_20241008143543.csv"
+    def merge(self, sentiment_output_data, summarization_data, extraction_data):
         self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
 
     def upload_and_create_job(self):
