@@ -1,4 +1,4 @@
-from batch_task import BatchTask, BatchTaskType
+from batch_task import BatchTask, BatchTaskType, BatchResult
 
 if __name__ == "__main__":
     sentiment_task = BatchTask(
@@ -19,4 +19,9 @@ if __name__ == "__main__":
     )
     extraction_data = extraction_task.run()
 
-    extraction_task.merge(sentiment_output_data, summarization_data, extraction_data)
+    result = BatchResult(
+        sentiment_output_data=sentiment_output_data,
+        summarization_data=summarization_data,
+        extraction_data=extraction_data
+    )
+    result.merge()
