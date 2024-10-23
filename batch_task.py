@@ -15,6 +15,65 @@ class BatchTaskType(str, Enum):
     EXTRACTION = "key_attributes_extraction"
 
 
+def latest_file(files, prefix):
+    files_by_type = [filename for filename in files if prefix in filename]
+    return max(files_by_type, key=lambda x: x.split('_')[-1].split('.')[0])
+
+
+class BatchResult:
+    def __init__(self):
+        self.directory = "output_data/"
+        self.sentiment_type_prefix = f"join_result_{BatchTaskType.SENTIMENT}"
+        self.summary_type_prefix = f"join_result_{BatchTaskType.SUMMARIZATION}"
+        self.extraction_type_prefix = f"join_result_{BatchTaskType.EXTRACTION}"
+        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        self.join_final_result_data_path = f"output_data/join_final_result_{time_str}.csv"
+
+    def output_data(self, filename):
+        return f"{self.directory}{filename}"
+
+    def merge(self):
+        file_list = []
+
+        for filename in os.listdir(self.directory):
+            f = os.path.join(self.directory, filename)
+            if os.path.isfile(f):
+                file_list.append(filename)
+
+        latest_sentiment_file = latest_file(file_list, self.sentiment_type_prefix)
+        latest_summary_file = latest_file(file_list, self.summary_type_prefix)
+        latest_extraction_file = latest_file(file_list, self.extraction_type_prefix)
+        print(latest_sentiment_file)
+        print(latest_summary_file)
+        print(latest_extraction_file)
+        print(self.output_data(latest_sentiment_file), self.output_data(latest_summary_file),
+              self.output_data(latest_extraction_file))
+        self.join_final_result_data(self.output_data(latest_sentiment_file), self.output_data(latest_summary_file),
+                                    self.output_data(latest_extraction_file))
+
+    def join_final_result_data(self, sentiment_output_data, summarization_data, extraction_data):
+        sentiment_output_data = pd.read_csv(sentiment_output_data)
+        summarization_data = pd.read_csv(summarization_data)
+        summarization_data = summarization_data[['club_id', 'course_id', 'result', 'comment']]
+        summarization_data.rename(
+            columns={'result': 'summarization_in_80_words_paragraph', 'comment': 'last_20_comments'},
+            inplace=True)
+        extraction_data = pd.read_csv(extraction_data)
+        extraction_data = extraction_data[['club_id', 'course_id', 'result']]
+        extraction_data.rename(columns={'result': 'summary_in_short_phrases'}, inplace=True)
+        course_names = pd.read_csv("input_data/golf_course_names.csv")
+        merged_df = pd.merge(sentiment_output_data, summarization_data,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df = pd.merge(merged_df, extraction_data,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df = pd.merge(merged_df, course_names,
+                             on=['club_id', 'course_id'],
+                             how='inner')
+        merged_df.to_csv(self.join_final_result_data_path)
+
+
 class BatchTask:
 
     def __init__(self,
@@ -32,7 +91,6 @@ class BatchTask:
         self.llm_result_data_path = f"output_data/llm_result_{task_type.value}_{time_str}.csv"
         self.join_result_data_path = f"output_data/join_result_{task_type.value}_{time_str}.csv"
         self.score_review_result_data_path = f"output_data/score_result_{task_type.value}_{time_str}.csv"
-        self.join_final_result_data_path = f"output_data/join_final_result_{task_type.value}_{time_str}.csv"
         self.model = model
         self.batch_endpoint = batch_endpoint
         self.encoding_used = encoding_used
@@ -88,21 +146,13 @@ class BatchTask:
             if llm_success and self.task_type == BatchTaskType.SENTIMENT:
                 self.join_results_with_original_data()
                 sentiment_output_data = self.score_review_data()
+                return sentiment_output_data
             elif self.task_type == BatchTaskType.SUMMARIZATION:
                 summarization_data = self.join_result_with_concatenated_data()
+                return summarization_data
             elif self.task_type == BatchTaskType.EXTRACTION:
                 extraction_data = self.join_result_with_concatenated_data()
-            if sentiment_output_data and summarization_data and extraction_data:
-                self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
-
-    def merge(self):
-        # todo: optimize by select the latest csv files
-        path_base = "output_data/join_result"
-        self.join_result_data_path = f"{path_base}_sentiment_20240925154832.csv"
-        sentiment_output_data = self.score_review_data()
-        summarization_data = f"{path_base}_summarization_20241003131302.csv"
-        extraction_data = f"{path_base}_key_attributes_extraction_20241008143543.csv"
-        self.join_final_result_data(sentiment_output_data, summarization_data, extraction_data)
+                return extraction_data
 
     def upload_and_create_job(self):
         file_id = self.upload_file()
@@ -282,25 +332,3 @@ class BatchTask:
                                        index=False,
                                        quoting=csv.QUOTE_ALL)
         return self.score_review_result_data_path
-
-    def join_final_result_data(self, sentiment_output_data, summarization_data, extraction_data):
-        sentiment_output_data = pd.read_csv(sentiment_output_data)
-        summarization_data = pd.read_csv(summarization_data)
-        summarization_data = summarization_data[['club_id', 'course_id', 'result', 'comment']]
-        summarization_data.rename(
-            columns={'result': 'summarization_in_80_words_paragraph', 'comment': 'last_20_comments'},
-            inplace=True)
-        extraction_data = pd.read_csv(extraction_data)
-        extraction_data = extraction_data[['club_id', 'course_id', 'result']]
-        extraction_data.rename(columns={'result': 'summary_in_short_phrases'}, inplace=True)
-        course_names = pd.read_csv("input_data/golf_course_names.csv")
-        merged_df = pd.merge(sentiment_output_data, summarization_data,
-                             on=['club_id', 'course_id'],
-                             how='inner')
-        merged_df = pd.merge(merged_df, extraction_data,
-                             on=['club_id', 'course_id'],
-                             how='inner')
-        merged_df = pd.merge(merged_df, course_names,
-                             on=['club_id', 'course_id'],
-                             how='inner')
-        merged_df.to_csv(self.join_final_result_data_path)
