@@ -15,19 +15,36 @@ class BatchTaskType(str, Enum):
     EXTRACTION = "key_attributes_extraction"
 
 
+def latest_file(files, prefix):
+    files_by_type = [filename for filename in files if prefix in filename]
+    return max(files_by_type, key=lambda x: x.split('_')[-1].split('.')[0])
+
+
 class BatchResult:
-    def __init__(self,
-                 sentiment_output_data,
-                 summarization_data,
-                 extraction_data):
+    def __init__(self):
+        self.directory = "output_data/"
+        self.sentiment_type_prefix = f"llm_result_{BatchTaskType.SENTIMENT}"
+        self.summary_type_prefix = f"llm_result_{BatchTaskType.SUMMARIZATION}"
+        self.extraction_type_prefix = f"llm_result_{BatchTaskType.EXTRACTION}"
         time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        self.sentiment_output_data = sentiment_output_data
-        self.summarization_data = summarization_data
-        self.extraction_data = extraction_data
         self.join_final_result_data_path = f"output_data/join_final_result_{time_str}.csv"
 
+    def output_data(self, filename):
+        return f"{self.directory}{filename}"
+
     def merge(self):
-        self.join_final_result_data(self.sentiment_output_data, self.summarization_data, self.extraction_data)
+        file_list = []
+
+        for filename in os.listdir(self.directory):
+            f = os.path.join(self.directory, filename)
+            if os.path.isfile(f):
+                file_list.append(filename)
+
+        latest_sentiment_file = latest_file(file_list, self.sentiment_type_prefix)
+        latest_summary_file = latest_file(file_list, self.summary_type_prefix)
+        latest_extraction_file = latest_file(file_list, self.extraction_type_prefix)
+        self.join_final_result_data(self.output_data(latest_sentiment_file), self.output_data(latest_summary_file),
+                                    self.output_data(latest_extraction_file))
 
     def join_final_result_data(self, sentiment_output_data, summarization_data, extraction_data):
         sentiment_output_data = pd.read_csv(sentiment_output_data)

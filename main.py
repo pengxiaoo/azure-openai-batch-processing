@@ -1,27 +1,37 @@
+import sys
+
 from batch_task import BatchTask, BatchTaskType, BatchResult
 
-if __name__ == "__main__":
+
+def run_batch_tasks():
     sentiment_task = BatchTask(
         task_type=BatchTaskType.SENTIMENT,
         input_data_path="input_data/golf_course_reviews_sample.csv",
     )
-    sentiment_output_data = sentiment_task.run()
+    sentiment_task.run()
 
     summarization_task = BatchTask(
         task_type=BatchTaskType.SUMMARIZATION,
         input_data_path="input_data/golf_course_reviews_sample.csv",
     )
-    summarization_data = summarization_task.run()
+    summarization_task.run()
 
     extraction_task = BatchTask(
         task_type=BatchTaskType.EXTRACTION,
         input_data_path="input_data/golf_course_reviews_sample.csv",
     )
-    extraction_data = extraction_task.run()
+    extraction_task.run()
 
-    result = BatchResult(
-        sentiment_output_data=sentiment_output_data,
-        summarization_data=summarization_data,
-        extraction_data=extraction_data
-    )
+
+def merge():
+    result = BatchResult()
     result.merge()
+
+
+if __name__ == "__main__":
+    running_mode = sys.argv[1] if len(sys.argv) > 1 else "merge"
+    if running_mode == "batch":
+        run_batch_tasks()
+        merge()
+    elif running_mode == "merge":
+        merge()
