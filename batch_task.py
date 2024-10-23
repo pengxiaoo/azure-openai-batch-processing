@@ -23,9 +23,9 @@ def latest_file(files, prefix):
 class BatchResult:
     def __init__(self):
         self.directory = "output_data/"
-        self.sentiment_type_prefix = f"llm_result_{BatchTaskType.SENTIMENT}"
-        self.summary_type_prefix = f"llm_result_{BatchTaskType.SUMMARIZATION}"
-        self.extraction_type_prefix = f"llm_result_{BatchTaskType.EXTRACTION}"
+        self.sentiment_type_prefix = f"join_result_{BatchTaskType.SENTIMENT}"
+        self.summary_type_prefix = f"join_result_{BatchTaskType.SUMMARIZATION}"
+        self.extraction_type_prefix = f"join_result_{BatchTaskType.EXTRACTION}"
         time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         self.join_final_result_data_path = f"output_data/join_final_result_{time_str}.csv"
 
@@ -43,6 +43,11 @@ class BatchResult:
         latest_sentiment_file = latest_file(file_list, self.sentiment_type_prefix)
         latest_summary_file = latest_file(file_list, self.summary_type_prefix)
         latest_extraction_file = latest_file(file_list, self.extraction_type_prefix)
+        print(latest_sentiment_file)
+        print(latest_summary_file)
+        print(latest_extraction_file)
+        print(self.output_data(latest_sentiment_file), self.output_data(latest_summary_file),
+              self.output_data(latest_extraction_file))
         self.join_final_result_data(self.output_data(latest_sentiment_file), self.output_data(latest_summary_file),
                                     self.output_data(latest_extraction_file))
 
