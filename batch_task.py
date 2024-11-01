@@ -105,8 +105,8 @@ class BatchTask:
         self.head_number = 20
         if provider == ApiProvider.MICROSOFT_AZURE.value:
             self.client = AzureOpenAI(
-                api_key=os.getenv("API_KEY"),
-                api_version=os.getenv("API_VERSION"),
+                api_key=os.getenv("AZURE_API_KEY"),
+                api_version=os.getenv("AZURE_API_VERSION"),
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
             )
             self.batch_endpoint = "/chat/completions"
@@ -114,7 +114,7 @@ class BatchTask:
         else:
             OpenAI.api_key = os.getenv("OPENAI_API_KEY")
             self.client = OpenAI()
-            self.batch_endpoint = "v1/chat/completions"
+            self.batch_endpoint = "/v1/chat/completions"
             self.model = "gpt-4o-mini"
 
     def get_prompt(self) -> str:
