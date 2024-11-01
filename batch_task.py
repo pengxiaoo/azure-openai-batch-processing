@@ -4,7 +4,6 @@ import json
 import os
 import time
 from enum import Enum
-
 import pandas as pd
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
@@ -19,6 +18,11 @@ class BatchTaskType(str, Enum):
     SENTIMENT = "sentiment"
     SUMMARIZATION = "summarization"
     EXTRACTION = "key_attributes_extraction"
+
+
+class ApiProvider(Enum):
+    MICROSOFT_AZURE = "MICROSOFT_AZURE"
+    OPENAI = "OPENAI"
 
 
 def latest_file(files, prefix):
@@ -80,18 +84,11 @@ class BatchResult:
         merged_df.to_csv(self.join_final_result_data_path)
 
 
-class ApiProvider(Enum):
-    MICROSOFT_AZURE = "MICROSOFT_AZURE"
-    OPENAI = "OPENAI"
-
-
 class BatchTask:
 
     def __init__(self,
                  task_type: BatchTaskType,
                  input_data_path,
-                 model="course-review",
-                 batch_endpoint="/chat/completions",
                  encoding_used="utf-8",
                  comment_col_name="comment",
                  ):
@@ -102,25 +99,23 @@ class BatchTask:
         self.llm_result_data_path = f"output_data/llm_result_{task_type.value}_{time_str}.csv"
         self.join_result_data_path = f"output_data/join_result_{task_type.value}_{time_str}.csv"
         self.score_review_result_data_path = f"output_data/score_result_{task_type.value}_{time_str}.csv"
-        self.model = model
-        self.batch_endpoint = batch_endpoint
-        if provider == ApiProvider.OPENAI.value:
-            self.batch_endpoint = '/v1' + batch_endpoint
-            self.model = 'gpt-4o-mini'
         self.encoding_used = encoding_used
         self.comment_col_name = comment_col_name
         self.batch_id = None
         self.head_number = 20
-
         if provider == ApiProvider.MICROSOFT_AZURE.value:
             self.client = AzureOpenAI(
                 api_key=os.getenv("API_KEY"),
                 api_version=os.getenv("API_VERSION"),
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
             )
+            self.batch_endpoint = "/chat/completions"
+            self.model = "course-review"
         else:
             OpenAI.api_key = os.getenv("OPENAI_API_KEY")
             self.client = OpenAI()
+            self.batch_endpoint = "v1/chat/completions"
+            self.model = "gpt-4o-mini"
 
     def get_prompt(self) -> str:
         if self.task_type == BatchTaskType.SENTIMENT:
@@ -157,9 +152,6 @@ class BatchTask:
         self.batch_id = self.upload_and_create_job()
         if self.batch_id is not None:
             llm_success = self.track_and_save_job_result()
-            sentiment_output_data = None
-            summarization_data = None
-            extraction_data = None
             if llm_success and self.task_type == BatchTaskType.SENTIMENT:
                 self.join_results_with_original_data()
                 sentiment_output_data = self.score_review_data()
