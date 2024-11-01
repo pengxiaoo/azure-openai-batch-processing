@@ -1,12 +1,18 @@
-import os
-from enum import Enum
-import time
-import datetime
-import pandas as pd
-import json
 import csv
+import datetime
+import json
+import os
+import time
+from enum import Enum
+
+import pandas as pd
 from dotenv import load_dotenv
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+
+# use constants defined in .env file
+load_dotenv()
+
+provider = os.getenv('API_PROVIDER')
 
 
 class BatchTaskType(str, Enum):
@@ -74,6 +80,11 @@ class BatchResult:
         merged_df.to_csv(self.join_final_result_data_path)
 
 
+class ApiProvider(Enum):
+    MICROSOFT_AZURE = "MICROSOFT_AZURE"
+    OPENAI = "OPENAI"
+
+
 class BatchTask:
 
     def __init__(self,
@@ -93,17 +104,23 @@ class BatchTask:
         self.score_review_result_data_path = f"output_data/score_result_{task_type.value}_{time_str}.csv"
         self.model = model
         self.batch_endpoint = batch_endpoint
+        if provider == ApiProvider.OPENAI.value:
+            self.batch_endpoint = '/v1' + batch_endpoint
+            self.model = 'gpt-4o-mini'
         self.encoding_used = encoding_used
         self.comment_col_name = comment_col_name
         self.batch_id = None
         self.head_number = 20
-        # use constants defined in .env file
-        load_dotenv()
-        self.client = AzureOpenAI(
-            api_key=os.getenv("API_KEY"),
-            api_version=os.getenv("API_VERSION"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-        )
+
+        if provider == ApiProvider.MICROSOFT_AZURE.value:
+            self.client = AzureOpenAI(
+                api_key=os.getenv("API_KEY"),
+                api_version=os.getenv("API_VERSION"),
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+        else:
+            OpenAI.api_key = os.getenv("OPENAI_API_KEY")
+            self.client = OpenAI()
 
     def get_prompt(self) -> str:
         if self.task_type == BatchTaskType.SENTIMENT:
