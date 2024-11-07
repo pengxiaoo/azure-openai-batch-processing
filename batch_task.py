@@ -1,10 +1,11 @@
-import io
 import csv
 import datetime
+import io
 import json
 import os
 import time
 from enum import Enum
+
 import pandas as pd
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
@@ -13,6 +14,7 @@ from openai import AzureOpenAI, OpenAI
 load_dotenv()
 
 provider = os.getenv('API_PROVIDER')
+max_requests = 20000
 
 
 class BatchTaskType(str, Enum):
@@ -30,11 +32,13 @@ def latest_file(files, prefix):
     files_by_type = [filename for filename in files if prefix in filename]
     return max(files_by_type, key=lambda x: x.split('_')[-1].split('.')[0])
 
+
 def create_chunks(file_content, max_requests):
     chunks = []
     for i in range(0, len(file_content), max_requests):
         chunks.append(file_content[i:i + max_requests])
     return chunks
+
 
 class BatchResult:
     def __init__(self):
@@ -90,133 +94,6 @@ class BatchResult:
         merged_df.to_csv(self.join_final_result_data_path)
 
 
-class BatchProcessor:
-
-    def __init__(self,
-                 client,
-                 batch_endpoint,
-                 llm_result_data_path,
-                 encoding_used,
-                 task_type
-                 ):
-        self.client = client
-        self.batch_endpoint = batch_endpoint
-        self.llm_result_data_path = llm_result_data_path
-        self.encoding_used = encoding_used
-        self.task_type = task_type
-
-    def upload_and_create_chunked_jobs(self, file_content):
-        chunks = self.create_chunks(file_content, max_requests=2)
-
-        job_ids = []
-        for chunk in chunks:
-            file_id = self.upload_file(chunk)
-            if file_id is None:
-                continue
-
-            job_id = self.create_batch_job(file_id)
-            job_ids.append(job_id)
-            print(f"Created job with ID {job_id} for chunk with File ID {file_id}")
-
-        output_file_ids = self.wait_for_jobs_to_complete(job_ids)
-        merged_result = self.merge_job_results(output_file_ids)
-        return merged_result
-
-    @staticmethod
-    def create_chunks(file_content, max_requests):
-        chunks = []
-        for i in range(0, len(file_content), max_requests):
-            chunks.append(file_content[i:i + max_requests])
-        return chunks
-
-    def wait_for_jobs_to_complete(self, job_ids):
-        output_file_ids = []
-        for job_id in job_ids:
-            status = "pending"
-            while status not in ("completed", "failed", "canceled"):
-                time.sleep(15)
-                batch_response = self.get_job_status(job_id)
-                status = batch_response.status
-                print(f"{datetime.datetime.now()} Job ID: {job_id}, Status: {status}")
-                if status == "failed":
-                    if batch_response:
-                        for error in batch_response.errors.data:
-                            print(f"Error code {error.code} Message {error.message}")
-                elif status == "completed" and batch_response.output_file_id:
-                    output_file_ids.append(batch_response.output_file_id)
-                    print(f"Output file: {batch_response.output_file_id}")
-        return output_file_ids
-
-    def merge_job_results(self, output_file_ids):
-        merged_results = []
-        for file_id in output_file_ids:
-            result = self.retrieve_job_result(file_id)
-            merged_results.extend(result)
-
-        header = ["custom_id", "result"]
-        with open(self.llm_result_data_path, "w", newline="", encoding=self.encoding_used,
-                  errors="ignore") as csv_file:
-            writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
-            # Write the header to the CSV file
-            writer.writerow(header)
-            # Write each row (JSON data)
-            json_data = sorted(merged_results, key=lambda x: int(x["custom_id"]))
-            for entry in json_data:
-                custom_id = entry.get("custom_id")
-                result = entry.get("result")
-                try:
-                    writer.writerow([custom_id, result])
-                except Exception as e:
-                    print(f"Error in save_job_result: {e}")
-                    print(custom_id, "=========", result)
-                    writer.writerow([custom_id, f"${self.task_type} result not available"])
-        print(f"Data has been exported to {self.llm_result_data_path}")
-        return self.llm_result_data_path
-
-    def upload_file(self, jsonl):
-        json_data = '\n'.join(json.dumps(entry) for entry in jsonl).encode('utf-8')
-        jsonl_file = io.BytesIO(json_data)
-        if jsonl_file is None:
-            return None
-        file = self.client.files.create(
-            file=jsonl_file,
-            purpose="batch"
-        )
-        return file.id
-
-    def create_batch_job(self, file_id: str) -> str:
-        batch_response = self.client.batches.create(
-            input_file_id=file_id,
-            endpoint=self.batch_endpoint,
-            completion_window="24h",
-        )
-        print(batch_response.model_dump_json(indent=2))
-        return batch_response.id
-
-    def get_job_status(self, batch_id):
-        batch_response = self.client.batches.retrieve(batch_id)
-        return batch_response
-
-    def retrieve_job_result(self, output_file_id):
-        file_response = self.client.files.content(output_file_id)
-        raw_responses = file_response.text.strip().split("\n")
-        json_data = []
-        result = []
-        for raw_response in raw_responses:
-            json_response = json.loads(raw_response)  # Convert raw JSON string to Python dict
-            json_data.append(json_response)
-        if len(json_data) > 0:
-            json_data = sorted(json_data, key=lambda x: int(x["custom_id"]))
-            for entry in json_data:
-                custom_id = entry.get("custom_id")
-                try:
-                    result.append({'custom_id': custom_id, 'result': entry["response"]["body"]["choices"][0]["message"]["content"].capitalize()})
-                except Exception as e:
-                    print(f"Error in save_job_result: {e}")
-                    print(custom_id, "=========", result)
-        return result
-
-
 class BatchTask:
 
     def __init__(self,
@@ -234,7 +111,7 @@ class BatchTask:
         self.score_review_result_data_path = f"output_data/score_result_{task_type.value}_{time_str}.csv"
         self.encoding_used = encoding_used
         self.comment_col_name = comment_col_name
-        self.batch_id = None
+        self.batch_ids = []
         self.head_number = 20
         if provider == ApiProvider.MICROSOFT_AZURE.value:
             self.client = AzureOpenAI(
@@ -282,8 +159,8 @@ class BatchTask:
 
     def run(self):
         # see https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/batch?pivots=programming-language-python
-        result = self.upload_and_create_job()
-        if result is not None:
+        self.batch_ids = self.upload_and_create_chunked_jobs()
+        if len(self.batch_ids) > 0:
             llm_success = self.track_and_save_job_result()
             if llm_success and self.task_type == BatchTaskType.SENTIMENT:
                 self.join_results_with_original_data()
@@ -296,20 +173,7 @@ class BatchTask:
                 extraction_data = self.join_result_with_concatenated_data()
                 return extraction_data
 
-    def upload_and_create_job(self):
-        # file_id = self.upload_file()
-        # if file_id is None:
-        #     return None
-        # status = "pending"
-        # while status != "processed":
-        #     time.sleep(15)
-        #     file_response = self.client.files.retrieve(file_id)
-        #     status = file_response.status
-        #     print(f"{datetime.datetime.now()} File Id: {file_id}, Status: {status}")
-        file_id = self.batch_processor()
-        return file_id
-
-    def batch_processor(self):
+    def upload_and_create_chunked_jobs(self):
         jsonl_file_path = self.convert_csv_to_jsonl()
         if jsonl_file_path is None:
             return None
@@ -317,10 +181,22 @@ class BatchTask:
         with open(jsonl_file_path, "r") as file:
             file_content = [json.loads(line) for line in file]
 
-        processor = BatchProcessor(self.client, self.batch_endpoint, self.llm_result_data_path, self.encoding_used, self.task_type)
+        chunks = create_chunks(file_content, max_requests=max_requests)
 
-        processor.upload_and_create_chunked_jobs(file_content)
-        return processor.upload_and_create_chunked_jobs(file_content)
+        job_ids = []
+        for chunk in chunks:
+            file_id = self.upload_file(chunk)
+            if file_id is None:
+                continue
+
+            job_id = self.create_batch_job(file_id)
+            job_ids.append(job_id)
+            print(f"Created job with ID {job_id} for chunk with File ID {file_id}")
+        return job_ids
+
+    def get_job_status(self, batch_id):
+        batch_response = self.client.batches.retrieve(batch_id)
+        return batch_response
 
     def get_dataframe_summarization(self):
         csv_file_path = self.input_data_path
@@ -333,17 +209,16 @@ class BatchTask:
         requests_df.to_csv(self.concatenated_data_path, index=False, quoting=csv.QUOTE_ALL)
         return requests_df
 
-    # def upload_file(self):
-    #     jsonl_file_path = self.convert_csv_to_jsonl()
-    #     if jsonl_file_path is None:
-    #         return None
-    #     file = self.client.files.create(
-    #         file=open(jsonl_file_path, "rb"),
-    #         purpose="batch"
-    #     )
-    #     return file.id
-
-
+    def upload_file(self, jsonl):
+        json_data = '\n'.join(json.dumps(entry) for entry in jsonl).encode('utf-8')
+        jsonl_file = io.BytesIO(json_data)
+        if jsonl_file is None:
+            return None
+        file = self.client.files.create(
+            file=jsonl_file,
+            purpose="batch"
+        )
+        return file.id
 
     def convert_csv_to_jsonl(self):
         csv_file_path = self.input_data_path
@@ -385,69 +260,85 @@ class BatchTask:
                 file.write(item + "\n")
         return output_file_path
 
-    # def create_batch_job(self, file_id: str) -> str:
-    #     batch_response = self.client.batches.create(
-    #         input_file_id=file_id,
-    #         endpoint=self.batch_endpoint,
-    #         completion_window="24h",
-    #     )
-    #     print(batch_response.model_dump_json(indent=2))
-    #     return batch_response.id
+    def create_batch_job(self, file_id: str) -> str:
+        batch_response = self.client.batches.create(
+            input_file_id=file_id,
+            endpoint=self.batch_endpoint,
+            completion_window="24h",
+        )
+        print(batch_response.model_dump_json(indent=2))
+        return batch_response.id
 
-    # def track_and_save_job_result(self) -> bool:
-    #     batch_response = None
-    #     status = "validating"
-    #     output_file_id = None
-    #     while status not in ("completed", "failed", "canceled"):
-    #         time.sleep(60)
-    #         batch_response = self.client.batches.retrieve(self.batch_id)
-    #         status = batch_response.status
-    #         output_file_id = batch_response.output_file_id
-    #         print(f"{datetime.datetime.now()} Batch Id: {self.batch_id},  Status: {status}")
-    #
-    #     if status == "failed":
-    #         if batch_response:
-    #             for error in batch_response.errors.data:
-    #                 print(f"Error code {error.code} Message {error.message}")
-    #     elif status == "completed" and output_file_id:
-    #         print(f"Output file: {output_file_id}")
-    #         return self.save_job_result(output_file_id)
-    #     else:
-    #         print("The batch job is canceled.")
-    #     return False
+    def wait_for_jobs_to_complete(self, job_ids):
+        output_file_ids = []
+        for job_id in job_ids:
+            status = "pending"
+            while status not in ("completed", "failed", "canceled"):
+                time.sleep(60)
+                batch_response = self.get_job_status(job_id)
+                status = batch_response.status
+                print(f"{datetime.datetime.now()} Job ID: {job_id}, Status: {status}")
+                if status == "failed":
+                    if batch_response:
+                        for error in batch_response.errors.data:
+                            print(f"Error code {error.code} Message {error.message}")
+                    return []
+                elif status == "completed" and batch_response.output_file_id:
+                    output_file_ids.append(batch_response.output_file_id)
+                    print(f"Output file: {batch_response.output_file_id}")
+        return output_file_ids
 
-    # def save_job_result(self, output_file_id) -> bool:
-    #     file_response = self.client.files.content(output_file_id)
-    #     raw_responses = file_response.text.strip().split("\n")
-    #     json_data = []
-    #     for raw_response in raw_responses:
-    #         json_response = json.loads(raw_response)  # Convert raw JSON string to Python dict
-    #         json_data.append(json_response)
-    #     if len(json_data) > 0:
-    #         # Get the header from the keys of the first JSON object
-    #         header = ["custom_id", "result"]
-    #         # Open the CSV file for writing
-    #         with open(self.llm_result_data_path, "w", newline="", encoding=self.encoding_used,
-    #                   errors="ignore") as csv_file:
-    #             writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
-    #             # Write the header to the CSV file
-    #             writer.writerow(header)
-    #             # Write each row (JSON data)
-    #             json_data = sorted(json_data, key=lambda x: int(x["custom_id"]))
-    #             for entry in json_data:
-    #                 custom_id = entry.get("custom_id")
-    #                 try:
-    #                     result = entry["response"]["body"]["choices"][0]["message"]["content"].capitalize()
-    #                     writer.writerow([custom_id, result])
-    #                 except Exception as e:
-    #                     print(f"Error in save_job_result: {e}")
-    #                     print(custom_id, "=========", result)
-    #                     writer.writerow([custom_id, f"${self.task_type} result not available"])
-    #         print(f"Data has been exported to {self.llm_result_data_path}")
-    #         return True
-    #     else:
-    #         print("No data to export to CSV.")
-    #         return False
+    def track_and_save_job_result(self) -> bool:
+        output_file_ids = self.wait_for_jobs_to_complete(self.batch_ids)
+        if len(output_file_ids) > 0:
+            # merge output files
+            merged_results = []
+            for file_id in output_file_ids:
+                result = self.retrieve_job_result(file_id)
+                merged_results.extend(result)
+            header = ["custom_id", "result"]
+            # save data
+            with open(self.llm_result_data_path, "w", newline="", encoding=self.encoding_used,
+                      errors="ignore") as csv_file:
+                writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
+                # Write the header to the CSV file
+                writer.writerow(header)
+                # Write each row (JSON data)
+                json_data = sorted(merged_results, key=lambda x: int(x["custom_id"]))
+                for entry in json_data:
+                    custom_id = entry.get("custom_id")
+                    result = entry.get("result")
+                    try:
+                        writer.writerow([custom_id, result])
+                    except Exception as e:
+                        print(f"Error in save_job_result: {e}")
+                        print(custom_id, "=========", result)
+                        writer.writerow([custom_id, f"${self.task_type} result not available"])
+            print(f"Data has been exported to {self.llm_result_data_path}")
+            return self.llm_result_data_path
+        else:
+            print("The batch job is canceled.")
+        return False
+
+    def retrieve_job_result(self, output_file_id) -> bool:
+        file_response = self.client.files.content(output_file_id)
+        raw_responses = file_response.text.strip().split("\n")
+        json_data = []
+        result = []
+        for raw_response in raw_responses:
+            json_response = json.loads(raw_response)  # Convert raw JSON string to Python dict
+            json_data.append(json_response)
+        if len(json_data) > 0:
+            json_data = sorted(json_data, key=lambda x: int(x["custom_id"]))
+            for entry in json_data:
+                custom_id = entry.get("custom_id")
+                try:
+                    result.append({'custom_id': custom_id, 'result': entry["response"]["body"]["choices"][0]["message"][
+                        "content"].capitalize()})
+                except Exception as e:
+                    print(f"Error in save_job_result: {e}")
+                    print(custom_id, "=========", result)
+        return result
 
     def join_results_with_original_data(self) -> str:
         df_input_data = pd.read_csv(self.input_data_path)

@@ -29,6 +29,7 @@ def merge():
 
 if __name__ == "__main__":
     run_batch_tasks()
+    merge()
     # running_mode = sys.argv[1] if len(sys.argv) > 1 else "merge"
     # if running_mode == "batch":
     #     run_batch_tasks()
