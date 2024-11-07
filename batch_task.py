@@ -14,7 +14,7 @@ from openai import AzureOpenAI, OpenAI
 load_dotenv()
 
 provider = os.getenv('API_PROVIDER')
-max_requests = 20000
+max_requests = 40000
 
 
 class BatchTaskType(str, Enum):
@@ -177,18 +177,14 @@ class BatchTask:
         jsonl_file_path = self.convert_csv_to_jsonl()
         if jsonl_file_path is None:
             return None
-
         with open(jsonl_file_path, "r") as file:
             file_content = [json.loads(line) for line in file]
-
         chunks = create_chunks(file_content)
-
         job_ids = []
         for chunk in chunks:
             file_id = self.upload_file(chunk)
             if file_id is None:
                 continue
-
             job_id = self.create_batch_job(file_id)
             job_ids.append(job_id)
             print(f"Created job with ID {job_id} for chunk with File ID {file_id}")
