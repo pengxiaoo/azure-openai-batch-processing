@@ -33,7 +33,7 @@ def latest_file(files, prefix):
     return max(files_by_type, key=lambda x: x.split('_')[-1].split('.')[0])
 
 
-def create_chunks(file_content, max_requests):
+def create_chunks(file_content):
     chunks = []
     for i in range(0, len(file_content), max_requests):
         chunks.append(file_content[i:i + max_requests])
@@ -315,12 +315,12 @@ class BatchTask:
                         print(custom_id, "=========", result)
                         writer.writerow([custom_id, f"${self.task_type} result not available"])
             print(f"Data has been exported to {self.llm_result_data_path}")
-            return self.llm_result_data_path
+            return True
         else:
             print("The batch job is canceled.")
         return False
 
-    def retrieve_job_result(self, output_file_id) -> bool:
+    def retrieve_job_result(self, output_file_id):
         file_response = self.client.files.content(output_file_id)
         raw_responses = file_response.text.strip().split("\n")
         json_data = []
