@@ -181,7 +181,7 @@ class BatchTask:
         with open(jsonl_file_path, "r") as file:
             file_content = [json.loads(line) for line in file]
 
-        chunks = create_chunks(file_content, max_requests=max_requests)
+        chunks = create_chunks(file_content)
 
         job_ids = []
         for chunk in chunks:
