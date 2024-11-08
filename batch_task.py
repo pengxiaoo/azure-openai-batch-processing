@@ -43,7 +43,7 @@ def create_chunks(file_content):
 class BatchResult:
     def __init__(self):
         self.directory = "output_data/"
-        self.sentiment_type_prefix = f"join_result_{BatchTaskType.SENTIMENT.value}"
+        self.sentiment_type_prefix = f"score_result_{BatchTaskType.SENTIMENT.value}"
         self.summary_type_prefix = f"join_result_{BatchTaskType.SUMMARIZATION.value}"
         self.extraction_type_prefix = f"join_result_{BatchTaskType.EXTRACTION.value}"
         time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
